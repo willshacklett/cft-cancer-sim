@@ -4,6 +4,14 @@ A toy cancer dynamics simulator built on **GV (scalar strain / risk)** and **CFT
 
 This project is intentionally simple: it demonstrates how **constraint failure** drives divergence between healthy and cancerous systems over time.
 
+This model demonstrates that:
+- Order and cooperation can emerge from constraint coupling alone
+- Failure modes (invasion, divergence, instability) arise when constraints weaken
+- No explicit biological rules are required for cancer-like dynamics to appear
+
+This supports a systems-level view where pathology is a failure of constraint integrity,
+not merely a collection of local mutations.
+
 ---
 
 ## GV Trajectory: Healthy vs Cancer
