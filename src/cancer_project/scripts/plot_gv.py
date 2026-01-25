@@ -1,20 +1,37 @@
 import matplotlib.pyplot as plt
 
-from cancer_project import Environment, HealthyCell, CancerCell, gv_score
+from cancer_project import (
+    Environment,
+    HealthyCell,
+    CancerCell,
+    gv_score,
+)
+
 
 def run(cell, env, steps=50):
     gv = []
     for _ in range(steps):
         cell.step(env)
         gv.append(
-            gv_score(cell.atp, cell.damage, cell.arrest_steps, cell.divisions)
+            gv_score(
+                cell.atp,
+                cell.damage,
+                cell.arrest_steps,
+                cell.divisions,
+            )
         )
         if not cell.alive:
             break
     return gv
 
+
 if __name__ == "__main__":
-    env = Environment(toxins=0.2, oxygen=0.5, nutrients=0.7)
+    # Environment stress scenario
+    env = Environment(
+        toxins=0.2,
+        oxygen=0.5,
+        nutrients=0.7,
+    )
 
     healthy = HealthyCell()
     cancer = CancerCell()
@@ -22,6 +39,7 @@ if __name__ == "__main__":
     gv_h = run(healthy, env)
     gv_c = run(cancer, env)
 
+    plt.figure(figsize=(8, 5))
     plt.plot(gv_h, label="Healthy Cell", linewidth=2)
     plt.plot(gv_c, label="Cancer Cell", linewidth=2)
 
@@ -32,5 +50,5 @@ if __name__ == "__main__":
     plt.grid(True)
 
     plt.tight_layout()
-plt.savefig("gv_healthy_vs_cancer.png", dpi=150)
-print("Saved gv_healthy_vs_cancer.png")
+    plt.savefig("gv_healthy_vs_cancer.png", dpi=150)
+    print("Saved gv_healthy_vs_cancer.png")
