@@ -10,7 +10,7 @@ from cancer_project import Environment
 
 def main() -> None:
     # Ensure assets exists
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
     assets_dir = os.path.join(repo_root, "assets")
     os.makedirs(assets_dir, exist_ok=True)
 
