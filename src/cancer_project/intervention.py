@@ -1,63 +1,66 @@
 """
 Intervention API (systems demo only).
 
-Defines a minimal, stable interface for constraint-restoration
-interventions that act on the Grid without hard-coded biology.
+Goal:
+- Define a minimal, stable interface for "therapies" that restore
+  constraint integrity (lambda) without encoding biology.
+
+This is NOT a medical model.
+It is a systems-level demonstration.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
-import numpy as np
+from typing import Protocol
 
 
-@dataclass
+@dataclass(frozen=True)
 class InterventionContext:
+    """
+    Read-only metadata available to interventions.
+
+    Keep this minimal so the API remains stable as the model evolves.
+    """
     t: int  # current timestep
 
 
-class Intervention:
+class Intervention(Protocol):
     """
-    Base protocol for interventions.
+    An intervention modifies the grid *in place*.
     """
+
     def apply(self, grid: "Grid", ctx: InterventionContext) -> None:
-        raise NotImplementedError
+        ...
 
 
-class NoOpIntervention(Intervention):
-    def apply(self, grid: "Grid", ctx: InterventionContext) -> None:
-        return
-
-
-class LambdaRestorationPulse(Intervention):
+class LocalConstraintRestoration:
     """
-    Simple systems-level "therapy":
+    Minimal intervention:
+    - If a cell's GV exceeds a threshold,
+      locally restore constraint tightness (lambda).
 
-    - Detects high-GV sites
-    - Locally restores lambda (constraint strength)
-    - No biology, no targeting logic beyond strain
+    This tests whether invasion fronts are reversible
+    via feedback recovery alone.
     """
 
     def __init__(
         self,
-        gv_threshold: float = 0.05,
-        restore_amount: float = 0.15,
-        every: int = 5,
+        gv_threshold: float = 0.5,
+        restore_strength: float = 0.05,
+        max_lambda: float = 1.5,
     ):
         self.gv_threshold = gv_threshold
-        self.restore_amount = restore_amount
-        self.every = every
+        self.restore_strength = restore_strength
+        self.max_lambda = max_lambda
 
     def apply(self, grid: "Grid", ctx: InterventionContext) -> None:
-        # Only pulse every N steps
-        if ctx.t % self.every != 0:
-            return
+        for i in range(grid.n):
+            for j in range(grid.n):
+                cell = grid.cells[i][j]
 
-        gv = grid.gv
-        lam = grid.lam
-        cfg = grid.cfg
-
-        mask = gv > self.gv_threshold
-        lam[mask] += self.restore_amount
-
-        # clamp
-        np.clip(lam, cfg.lambda_min, cfg.lambda_max, out=lam)
+                if cell.gv > self.gv_threshold:
+                    cell.lambda_ = min(
+                        self.max_lambda,
+                        cell.lambda_ + self.restore_strength,
+                    )
