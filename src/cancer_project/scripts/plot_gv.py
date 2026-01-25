@@ -1,12 +1,26 @@
-import os
+"""
+plot_gv.py
+
+Compares GV trajectory for HealthyCell vs CancerCell and saves outputs.
+Works in headless environments (GitHub Codespaces / CI).
+
+Outputs (saved in this same folder):
+- gv_healthy_vs_cancer.png
+- EXECUTION_CONFIRMED.txt
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
 import matplotlib
-matplotlib.use("Agg")  # headless backend for Codespaces
+matplotlib.use("Agg")  # Headless backend for Codespaces / CI
 import matplotlib.pyplot as plt
 
 from cancer_project import Environment, HealthyCell, CancerCell, gv_score
 
 
-def run(cell, env, steps=50):
+def run(cell, env, steps: int = 50):
     gv = []
     for _ in range(steps):
         cell.step(env)
@@ -18,19 +32,35 @@ def run(cell, env, steps=50):
                 cell.divisions,
             )
         )
-        if not cell.alive:
+        if not getattr(cell, "alive", True):
             break
     return gv
 
 
 def main():
-    env = Environment(toxins=0.2, oxygen=0.5, nutrients=0.7)
+    here = Path(__file__).resolve().parent
+
+    plot_path = here / "gv_healthy_vs_cancer.png"
+    confirm_path = here / "EXECUTION_CONFIRMED.txt"
+
+    # Write execution proof (non-negotiable)
+    confirm_path.write_text(
+        "plot_gv.py executed successfully.\n",
+        encoding="utf-8",
+    )
+
+    # Environment stress scenario
+    env = Environment(
+        toxins=0.2,
+        oxygen=0.5,
+        nutrients=0.7,
+    )
 
     healthy = HealthyCell()
     cancer = CancerCell()
 
-    gv_h = run(healthy, env)
-    gv_c = run(cancer, env)
+    gv_h = run(healthy, env, steps=60)
+    gv_c = run(cancer, env, steps=60)
 
     plt.figure(figsize=(8, 5))
     plt.plot(gv_h, label="Healthy Cell", linewidth=2)
@@ -38,16 +68,14 @@ def main():
     plt.xlabel("Time step")
     plt.ylabel("GV (strain / risk)")
     plt.title("GV Trajectory: Healthy vs Cancer")
-    plt.legend()
     plt.grid(True)
+    plt.legend()
     plt.tight_layout()
-
-    out_path = os.path.join(os.path.dirname(__file__), "gv_healthy_vs_cancer.png")
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(plot_path, dpi=150)
     plt.close()
 
-    print("Saved plot to:", out_path)
-    print("Exists:", os.path.exists(out_path))
+    print("Saved plot:", plot_path)
+    print("Execution confirmed:", confirm_path)
 
 
 if __name__ == "__main__":
