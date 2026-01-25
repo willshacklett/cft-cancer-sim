@@ -2,219 +2,192 @@
 Minimal multicell emergence model (systems demo only).
 
 A 2D grid of cells where each site has:
-- GV: accumulated "strain/risk" scalar
-- lambda: local constraint tightness (feedback strength)
+- gv: accumulated strain / risk scalar
+- lambda_: local constraint tightness (feedback strength)
 
 Local coupling:
 - Healthy cells reinforce neighbor lambda
 - Cancer cells erode neighbor lambda
 - Rare stochastic events reduce lambda ("mutation" as constraint relaxation)
 
-This is not a medical model. It's a systems-level demonstration.
+This is NOT a medical model. It is a systems-level demonstration.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import random
-from typing import List, Tuple, Optional
+from typing import Optional, List, Tuple
 
 import numpy as np
 
-# We reuse your existing single-cell environment + cell classes if present.
-# If your package exports these, this import will work.
+# ---------------------------------------------------------------------
+# Import single-cell components (must exist in cancer_project)
+# ---------------------------------------------------------------------
 try:
     from cancer_project import Environment, HealthyCell, CancerCell
 except Exception as e:
     raise ImportError(
-        "Could not import Environment/HealthyCell/CancerCell from cancer_project. "
-        "Make sure those exist and are exported in cancer_project/__init__.py."
+        "Could not import Environment / HealthyCell / CancerCell "
+        "from cancer_project. Make sure they are exported in __init__.py"
     ) from e
 
 
+# ---------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------
 @dataclass
 class GridConfig:
-    n: int = 20
+    n: int = 20              # grid width/height
     steps: int = 60
 
-    # initial state
-    init_cancer_prob: float = 0.03
+    # Coupling strengths
+    neighbor_strength: float = 0.02
+    erosion_strength: float = 0.03
 
-    # lambda dynamics
-    lambda_init: float = 1.0
-    lambda_min: float = 0.05
+    # Noise / mutation
+    mutation_rate: float = 0.002
+    mutation_lambda_drop: float = 0.15
+
+    # Bounds
+    lambda_min: float = 0.0
     lambda_max: float = 2.0
 
-    # coupling strengths
-    neighbor_strength: float = 0.010  # healthy -> increase neighbor lambda
-    erosion_strength: float = 0.020   # cancer  -> decrease neighbor lambda
 
-    # stochastic constraint relaxation
-    mutation_prob: float = 0.002
-    mutation_drop: float = 0.15  # subtract from lambda
+# ---------------------------------------------------------------------
+# Grid Cell Wrapper
+# ---------------------------------------------------------------------
+class GridCell:
+    """
+    Lightweight wrapper so every grid site ALWAYS has gv + lambda_.
+    """
+    def __init__(self, base_cell):
+        self.base = base_cell
+        self.gv: float = 0.0
+        self.lambda_: float = 1.0
 
-    # GV update parameters (kept simple + interpretable)
-    constraint_strength: float = 0.25
-    strain_atp_weight: float = 0.35
-    strain_damage_weight: float = 0.65
-    strain_div_weight: float = 0.06
-    strain_arrest_weight: float = 0.12
+    @property
+    def is_healthy(self) -> bool:
+        return isinstance(self.base, HealthyCell)
 
-    seed: Optional[int] = 7
+    @property
+    def is_cancer(self) -> bool:
+        return isinstance(self.base, CancerCell)
 
 
+# ---------------------------------------------------------------------
+# Grid
+# ---------------------------------------------------------------------
 class Grid:
     def __init__(self, cfg: GridConfig, env: Environment):
         self.cfg = cfg
         self.env = env
 
-        if cfg.seed is not None:
-            random.seed(cfg.seed)
-            np.random.seed(cfg.seed)
+        self.w = cfg.n
+        self.h = cfg.n
 
-        self.n = int(cfg.n)
+        # initialize grid
+        self.grid: List[List[GridCell]] = [
+            [self._init_cell(x, y) for y in range(self.h)]
+            for x in range(self.w)
+        ]
 
-        # Cell objects
-        self.cells: List[List[object]] = []
-        for i in range(self.n):
-            row = []
-            for j in range(self.n):
-                if random.random() < cfg.init_cancer_prob:
-                    row.append(CancerCell())
-                else:
-                    row.append(HealthyCell())
-            self.cells.append(row)
+    # -----------------------------
+    # Initialization helpers
+    # -----------------------------
+    def _init_cell(self, x: int, y: int) -> GridCell:
+        # Simple seed: center cancer, rest healthy
+        cx, cy = self.w // 2, self.h // 2
+        if abs(x - cx) + abs(y - cy) <= 1:
+            return GridCell(CancerCell(self.env))
+        return GridCell(HealthyCell(self.env))
 
-        # Local constraint tightness field (lambda)
-        self.lmbda = np.full((self.n, self.n), float(cfg.lambda_init), dtype=float)
+    # -----------------------------
+    # Access helpers
+    # -----------------------------
+    def cell(self, x: int, y: int) -> GridCell:
+        return self.grid[x][y]
 
-        # GV scalar field
-        self.gv = np.zeros((self.n, self.n), dtype=float)
-
-        self.t = 0
-
-    def _neighbors(self, i: int, j: int) -> List[Tuple[int, int]]:
+    def neighbors(self, x: int, y: int) -> List[GridCell]:
         out = []
-        for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            ni, nj = i + di, j + dj
-            if 0 <= ni < self.n and 0 <= nj < self.n:
-                out.append((ni, nj))
+        for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < self.w and 0 <= ny < self.h:
+                out.append(self.grid[nx][ny])
         return out
 
-    def _is_cancer(self, cell: object) -> bool:
-        return cell.__class__.__name__.lower().startswith("cancer")
+    def cells_flat(self):
+        for row in self.grid:
+            for c in row:
+                yield c
 
-    def _cell_strain(self, cell: object) -> float:
-        """
-        Simple strain proxy derived from existing single-cell state.
-        We intentionally keep this minimal and robust.
-        """
-        atp = float(getattr(cell, "atp", 1.0))
-        damage = float(getattr(cell, "damage", 0.0))
-        arrest_steps = float(getattr(cell, "arrest_steps", 0.0))
-        divisions = float(getattr(cell, "divisions", 0.0))
+    # -----------------------------
+    # Dynamics
+    # -----------------------------
+    def step(self):
+        cfg = self.cfg
 
-        strain = (
-            self.cfg.strain_atp_weight * max(0.0, 1.0 - atp) +
-            self.cfg.strain_damage_weight * max(0.0, damage) +
-            self.cfg.strain_div_weight * max(0.0, divisions) +
-            self.cfg.strain_arrest_weight * (1.0 if arrest_steps > 0 else 0.0)
-        )
-        return float(strain)
+        # 1. Local constraint coupling
+        for x in range(self.w):
+            for y in range(self.h):
+                c = self.cell(x, y)
+                for n in self.neighbors(x, y):
+                    if c.is_healthy:
+                        n.lambda_ += cfg.neighbor_strength
+                    elif c.is_cancer:
+                        n.lambda_ -= cfg.erosion_strength
 
-    def step(self) -> None:
-        """
-        One timestep:
-        1) Step each cell with the shared environment
-        2) Update lambda via local coupling + mutation
-        3) Update GV using strain accumulation minus lambda feedback
-        """
-        n = self.n
+        # 2. Mutation / stochastic constraint failure
+        for c in self.cells_flat():
+            if random.random() < cfg.mutation_rate:
+                c.lambda_ -= cfg.mutation_lambda_drop
 
-        # 1) Step cells
-        for i in range(n):
-            for j in range(n):
-                self.cells[i][j].step(self.env)
+        # 3. Clamp lambda
+        for c in self.cells_flat():
+            c.lambda_ = max(cfg.lambda_min, min(cfg.lambda_max, c.lambda_))
 
-        # 2) Lambda coupling
-        delta = np.zeros((n, n), dtype=float)
+        # 4. GV accumulation (strain rises when constraints are weak)
+        for c in self.cells_flat():
+            strain = max(0.0, 1.0 - c.lambda_)
+            c.gv += strain
 
-        for i in range(n):
-            for j in range(n):
-                cell = self.cells[i][j]
-                if self._is_cancer(cell):
-                    # cancer erodes neighbors
-                    for ni, nj in self._neighbors(i, j):
-                        delta[ni, nj] -= self.cfg.erosion_strength
-                else:
-                    # healthy reinforces neighbors
-                    for ni, nj in self._neighbors(i, j):
-                        delta[ni, nj] += self.cfg.neighbor_strength
-
-        # apply stochastic constraint relaxation
-        if self.cfg.mutation_prob > 0:
-            mut_mask = np.random.rand(n, n) < self.cfg.mutation_prob
-            delta[mut_mask] -= self.cfg.mutation_drop
-
-        self.lmbda = np.clip(self.lmbda + delta, self.cfg.lambda_min, self.cfg.lambda_max)
-
-        # 3) GV update
-        for i in range(n):
-            for j in range(n):
-                cell = self.cells[i][j]
-                strain = self._cell_strain(cell)
-
-                # GV_{t+1} = GV_t + strain - lambda * constraint_strength * GV_t
-                gv_t = self.gv[i, j]
-                gv_next = gv_t + strain - (self.lmbda[i, j] * self.cfg.constraint_strength * gv_t)
-                self.gv[i, j] = max(0.0, gv_next)
-
-        self.t += 1
-
+    # -----------------------------
+    # Metrics
+    # -----------------------------
     def mean_gv(self) -> float:
-        return float(self.gv.mean())
+        return float(np.mean([c.gv for c in self.cells_flat()]))
 
     def mean_lambda(self) -> float:
-        return float(self.lmbda.mean())
+        return float(np.mean([c.lambda_ for c in self.cells_flat()]))
 
     def gv_field(self) -> np.ndarray:
-        return self.gv.copy()
+        return np.array([[self.grid[x][y].gv for y in range(self.h)] for x in range(self.w)])
 
     def lambda_field(self) -> np.ndarray:
-        return self.lmbda.copy()
+        return np.array([[self.grid[x][y].lambda_ for y in range(self.h)] for x in range(self.w)])
 
 
-def run_grid(cfg: GridConfig | None = None, env: Environment | None = None) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Runs the grid and returns (mean_gv_over_time, mean_lambda_over_time).
-    """
-    cfg = cfg or GridConfig()
-    env = env or Environment(toxins=0.2, oxygen=0.5, nutrients=0.7)
-
-    grid = Grid(cfg, env)
-    gv_hist = []
-    lam_hist = []
-
-    for _ in range(cfg.steps):
-        grid.step()
-        gv_hist.append(grid.mean_gv())
-        lam_hist.append(grid.mean_lambda())
-
-    return np.array(gv_hist, dtype=float), np.array(lam_hist, dtype=float)
-
-
+# ---------------------------------------------------------------------
+# Demo / Entrypoint
+# ---------------------------------------------------------------------
 def run_demo() -> None:
     """
-    CLI/demo output: prints a simple emergence signal as CSV:
-    t,mean_gv,mean_lambda
+    Prints a simple emergence signal:
+    - mean GV over time
+    - mean lambda over time
     """
     cfg = GridConfig()
     env = Environment(toxins=0.2, oxygen=0.5, nutrients=0.7)
-    gv_hist, lam_hist = run_grid(cfg, env)
+    grid = Grid(cfg, env)
 
     print("t,mean_gv,mean_lambda")
-    for t in range(len(gv_hist)):
-        print(f"{t},{gv_hist[t]:.6f},{lam_hist[t]:.6f}")
+    for t in range(cfg.steps):
+        grid.step()
+        print(f"{t},{grid.mean_gv():.6f},{grid.mean_lambda():.6f}")
+
+
+# Backwards-compatible alias
+run_grid = run_demo
 
 
 if __name__ == "__main__":
