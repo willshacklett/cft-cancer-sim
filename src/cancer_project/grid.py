@@ -170,6 +170,8 @@ def run_demo() -> None:
         grid.step()
         print(f"{t},{grid.mean_gv():.6f},{grid.mean_lambda():.6f}")
 
+# Backwards-compatible alias for scripts expecting run_grid()
+run_grid = run_demo
 
 if __name__ == "__main__":
     run_demo()
