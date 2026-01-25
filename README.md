@@ -27,3 +27,23 @@ It is a **systems-level demonstration**.
 
 ## Project structure
 
+```text
+cft-cancer-sim/
+├── README.md
+├── pyproject.toml
+├── poetry.lock
+├── assets/
+│   └── gv_healthy_vs_cancer.png
+├── src/
+│   └── cancer_project/
+│       ├── __init__.py
+│       ├── env.py
+│       ├── gv.py
+│       ├── cell_base.py
+│       ├── healthy_cell.py
+│       ├── cancer_cell.py
+│       ├── sim.py
+│       └── scripts/
+│           ├── __init__.py
+│           └── plot_gv.py
+└── tests/
