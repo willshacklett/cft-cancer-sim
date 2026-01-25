@@ -31,4 +31,6 @@ if __name__ == "__main__":
     plt.legend()
     plt.grid(True)
 
-    plt.show()
+    plt.tight_layout()
+plt.savefig("gv_healthy_vs_cancer.png", dpi=150)
+print("Saved gv_healthy_vs_cancer.png")
