@@ -6,6 +6,12 @@ This project is intentionally simple: it demonstrates how **constraint failure**
 
 ---
 
+## GV Trajectory: Healthy vs Cancer
+
+![GV Healthy vs Cancer](src/cancer_project/scripts/gv_healthy_vs_cancer.png)
+
+---
+
 ## What this is
 
 - A **baseline HealthyCell model**
