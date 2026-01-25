@@ -1,12 +1,10 @@
 """
 Minimal multicell emergence model (systems demo only).
 
-A 2D grid of sites. Each site has:
-- gv: accumulated "strain / risk" scalar
-- lam: local constraint tightness (feedback strength)
+Grid owns the system state.
+Cells provide update dynamics only.
 
 This is NOT a medical model.
-It is a systems-level demonstration.
 """
 
 from __future__ import annotations
@@ -18,13 +16,13 @@ from typing import Optional
 import numpy as np
 
 # ------------------------------------------------------------
-# Import single-cell components
+# Single-cell components
 # ------------------------------------------------------------
 try:
     from cancer_project import Environment, HealthyCell, CancerCell
 except Exception as e:
     raise ImportError(
-        "Could not import Environment / HealthyCell / CancerCell. "
+        "Missing Environment / HealthyCell / CancerCell. "
         "Check cancer_project/__init__.py"
     ) from e
 
@@ -38,9 +36,9 @@ try:
         NoOpIntervention,
     )
 except Exception:
-    Intervention = None  # type: ignore
-    InterventionContext = None  # type: ignore
-    NoOpIntervention = None  # type: ignore
+    Intervention = None
+    InterventionContext = None
+    NoOpIntervention = None
 
 
 # ------------------------------------------------------------
@@ -57,6 +55,7 @@ class GridConfig:
     mutation_prob: float = 0.001
     min_lambda: float = 0.0
     max_lambda: float = 2.0
+    init_lambda: float = 1.0
 
 
 # ------------------------------------------------------------
@@ -78,7 +77,13 @@ class Grid:
 
         self.env = Environment()
 
+        # Cells
         self.cells = np.empty((self.n, self.n), dtype=object)
+
+        # System state (owned by grid)
+        self.gv = np.zeros((self.n, self.n), dtype=float)
+        self.lam = np.full((self.n, self.n), cfg.init_lambda, dtype=float)
+
         for i in range(self.n):
             for j in range(self.n):
                 if random.random() < cfg.init_cancer_prob:
@@ -104,38 +109,37 @@ class Grid:
     # Simulation step
     # --------------------------------------------------------
     def step(self):
-        # Intrinsic updates
+        # Cell intrinsic dynamics
         for i in range(self.n):
             for j in range(self.n):
                 self.cells[i, j].step(self.env)
+                self.gv[i, j] += self.env.gv  # accumulate strain signal
 
         # Local coupling
         for i in range(self.n):
             for j in range(self.n):
-                cell = self.cells[i, j]
                 for ni, nj in self.neighbors(i, j):
-                    neighbor = self.cells[ni, nj]
-                    if isinstance(cell, HealthyCell):
-                        neighbor.lam += self.cfg.neighbor_strength
+                    if isinstance(self.cells[i, j], HealthyCell):
+                        self.lam[ni, nj] += self.cfg.neighbor_strength
                     else:
-                        neighbor.lam -= self.cfg.neighbor_strength
+                        self.lam[ni, nj] -= self.cfg.neighbor_strength
 
-        # Mutation / constraint erosion
+        # Mutation / erosion
         for i in range(self.n):
             for j in range(self.n):
                 if random.random() < self.cfg.mutation_prob:
-                    self.cells[i, j].lam *= 0.5
+                    self.lam[i, j] *= 0.5
 
-                self.cells[i, j].lam = float(
+                self.lam[i, j] = float(
                     np.clip(
-                        self.cells[i, j].lam,
+                        self.lam[i, j],
                         self.cfg.min_lambda,
                         self.cfg.max_lambda,
                     )
                 )
 
         # Intervention hook
-        if self.intervention is not None and InterventionContext is not None:
+        if self.intervention and InterventionContext:
             ctx = InterventionContext(t=self.t)
             self.intervention.apply(self, ctx)
 
@@ -145,19 +149,19 @@ class Grid:
     # Fields (for plotting)
     # --------------------------------------------------------
     def gv_field(self) -> np.ndarray:
-        return np.array([[c.gv for c in row] for row in self.cells])
+        return self.gv.copy()
 
     def lambda_field(self) -> np.ndarray:
-        return np.array([[c.lam for c in row] for row in self.cells])
+        return self.lam.copy()
 
     # --------------------------------------------------------
     # Metrics
     # --------------------------------------------------------
     def mean_gv(self) -> float:
-        return float(np.mean(self.gv_field()))
+        return float(np.mean(self.gv))
 
     def mean_lambda(self) -> float:
-        return float(np.mean(self.lambda_field()))
+        return float(np.mean(self.lam))
 
 
 # ------------------------------------------------------------
