@@ -2,14 +2,14 @@
 Minimal multicell emergence model (systems demo only).
 
 A 2D grid of sites. Each site has:
-- a single-cell object (HealthyCell / CancerCell) reused from the single-cell model
-- gv: accumulated "strain / risk" scalar (computed from cell state)
-- lam: local constraint tightness (feedback strength), stored at the grid level
+- a Cell object (HealthyCell or CancerCell)
+- gv: a derived "strain/risk" scalar (computed from cell state via gv_score)
+- lam: local constraint tightness / feedback strength (scalar field)
 
 Local coupling:
 - Healthy sites reinforce neighbor lam
 - Cancer sites erode neighbor lam
-- Rare stochastic "mutation" events reduce lam
+- Rare stochastic events reduce lam ("mutation" as constraint relaxation)
 
 This is NOT a medical model. It is a systems-level demonstration.
 """
@@ -18,240 +18,197 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import random
-from typing import Optional, Tuple, Any, Dict
+from typing import Optional, Tuple
 
 import numpy as np
 
-# --- single-cell components must exist in cancer_project ---
+# Import single-cell components (must exist in cancer_project)
 try:
-    from cancer_project import Environment, HealthyCell, CancerCell  # type: ignore
+    from cancer_project import Environment, HealthyCell, CancerCell
 except Exception as e:
     raise ImportError(
         "Could not import Environment / HealthyCell / CancerCell from cancer_project. "
         "Make sure they exist and are exported in cancer_project/__init__.py"
     ) from e
 
-# GV scoring function (if present)
+# GV scoring function (must exist in cancer_project/gv.py)
 try:
-    from cancer_project.gv import gv_score  # type: ignore
-except Exception:
-    gv_score = None  # we'll fall back to a simple proxy if missing
-
-# Optional intervention API (safe if you don't use it)
-try:
-    from cancer_project.intervention import (  # type: ignore
-        Intervention,
-        InterventionContext,
-        NoOpIntervention,
-    )
-except Exception:
-    Intervention = None  # type: ignore
-    InterventionContext = None  # type: ignore
-
-    class NoOpIntervention:  # type: ignore
-        def apply(self, grid: "Grid", ctx: Any) -> None:
-            return
+    from cancer_project.gv import gv_score
+except Exception as e:
+    raise ImportError(
+        "Could not import gv_score from cancer_project.gv. "
+        "Make sure cancer_project/gv.py exports gv_score."
+    ) from e
 
 
 @dataclass
 class GridConfig:
+    # grid shape
     n: int = 20
     steps: int = 60
 
-    # init
+    # initialization
     init_cancer_prob: float = 0.03
-    seed: int = 7
+    seed: Optional[int] = 7
 
-    # constraint coupling (lambda dynamics)
+    # constraint field (lam) parameters
     lam_init: float = 1.0
-    lam_min: float = 0.05
+    lam_min: float = 0.0
     lam_max: float = 2.0
 
-    healthy_reinforce: float = 0.010
-    cancer_erode: float = 0.018
+    # coupling strength to neighbors per step
+    neighbor_strength: float = 0.03
 
-    neighbor_strength: float = 0.12  # neighbor averaging weight
-    mutation_rate: float = 0.002     # chance per site per step
-    mutation_drop: float = 0.25      # lam *= (1 - mutation_drop)
+    # probability per site per step of a "mutation" event that reduces lam
+    mutation_prob: float = 0.002
+    mutation_drop: float = 0.10
 
-    # gv smoothing
-    gv_smooth: float = 0.15  # EMA mix for gv field (0=no smooth)
-
-
-def _clamp(x: float, lo: float, hi: float) -> float:
-    return lo if x < lo else hi if x > hi else x
-
-
-def _is_cancer(cell: Any) -> bool:
-    # robust: class name check avoids tight coupling
-    return cell.__class__.__name__.lower().startswith("cancer")
-
-
-def _safe_get(obj: Any, name: str, default: float = 0.0) -> float:
-    v = getattr(obj, name, default)
-    try:
-        return float(v)
-    except Exception:
-        return float(default)
-
-
-def _compute_gv(cell: Any) -> float:
-    """
-    Prefer gv_score() if available; otherwise compute a stable proxy.
-    """
-    # pull common state variables defensively
-    atp = _safe_get(cell, "atp", 0.0)
-    damage = _safe_get(cell, "damage", 0.0)
-    arrest_steps = int(_safe_get(cell, "arrest_steps", 0.0))
-    divisions = int(_safe_get(cell, "divisions", 0.0))
-
-    if gv_score is not None:
-        try:
-            return float(gv_score(atp=atp, damage=damage, arrest_steps=arrest_steps, divisions=divisions))
-        except Exception:
-            pass
-
-    # fallback proxy: higher damage + lower ATP => higher GV (risk/strain)
-    # bounded to keep plots sane
-    proxy = (damage * 0.08) + (1.0 / (1.0 + max(atp, 0.0)))
-    return float(_clamp(proxy, 0.0, 5.0))
+    # optional small diffusion/smoothing of lam each step (keeps fields nicer)
+    lam_smoothing: float = 0.10  # 0 disables, typical 0.05–0.2
 
 
 class Grid:
-    def __init__(
-        self,
-        cfg: GridConfig,
-        env: Optional["Environment"] = None,
-        intervention: Optional[Any] = None,
-    ) -> None:
+    def __init__(self, cfg: GridConfig, env: Optional[Environment] = None):
         self.cfg = cfg
+        self.n = int(cfg.n)
+
+        # reproducible randomness
         self.rng = random.Random(cfg.seed)
+
+        # environment used by cell.step(...)
         self.env = env if env is not None else Environment(toxins=0.2, oxygen=0.5, nutrients=0.7)
 
-        # intervention hook
-        self.intervention = intervention if intervention is not None else NoOpIntervention()
-
-        # cells + fields
-        self.cells = np.empty((cfg.n, cfg.n), dtype=object)
-        self.lam = np.full((cfg.n, cfg.n), float(cfg.lam_init), dtype=float)
-        self.gv = np.zeros((cfg.n, cfg.n), dtype=float)
-
-        self._init_cells()
-
-    def _init_cells(self) -> None:
-        for i in range(self.cfg.n):
-            for j in range(self.cfg.n):
-                if self.rng.random() < self.cfg.init_cancer_prob:
-                    self.cells[i, j] = self._make_cell(cancer=True)
+        # cell grid
+        self.cells: np.ndarray = np.empty((self.n, self.n), dtype=object)
+        for i in range(self.n):
+            for j in range(self.n):
+                if self.rng.random() < cfg.init_cancer_prob:
+                    self.cells[i, j] = CancerCell()
                 else:
-                    self.cells[i, j] = self._make_cell(cancer=False)
-        self._refresh_gv()
+                    self.cells[i, j] = HealthyCell()
 
-    def _make_cell(self, cancer: bool) -> Any:
+        # fields
+        self.gv: np.ndarray = np.zeros((self.n, self.n), dtype=float)
+        self.lam: np.ndarray = np.full((self.n, self.n), float(cfg.lam_init), dtype=float)
+
+        # time
+        self.t: int = 0
+
+        # initialize gv once from initial cell states
+        self._recompute_gv()
+
+    # ---------------------------
+    # neighborhood helpers
+    # ---------------------------
+    def _neighbors4(self, i: int, j: int):
+        if i > 0:
+            yield (i - 1, j)
+        if i < self.n - 1:
+            yield (i + 1, j)
+        if j > 0:
+            yield (i, j - 1)
+        if j < self.n - 1:
+            yield (i, j + 1)
+
+    # ---------------------------
+    # core dynamics
+    # ---------------------------
+    def step(self) -> None:
         """
-        IMPORTANT: don't pass positional args.
-        Some of your classes are dataclasses where the first field is 'atp',
-        so passing env positionally will corrupt state (env becomes atp).
+        One simulation step:
+        1) advance all cells using env
+        2) recompute gv field from cell state
+        3) update lam field via local coupling + mutation + optional smoothing
         """
-        if cancer:
-            try:
-                return CancerCell()  # type: ignore
-            except TypeError:
-                return CancerCell  # pragma: no cover
-        else:
-            try:
-                return HealthyCell()  # type: ignore
-            except TypeError:
-                return HealthyCell  # pragma: no cover
+        # 1) cell updates
+        for i in range(self.n):
+            for j in range(self.n):
+                # IMPORTANT: HealthyCell.step requires env (your error earlier)
+                self.cells[i, j].step(self.env, dt=1.0, rng=self.rng)
 
-    def neighbors(self, i: int, j: int) -> Tuple[Tuple[int, int], ...]:
-        n = self.cfg.n
-        coords = []
-        for di, dj in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-            ii, jj = i + di, j + dj
-            if 0 <= ii < n and 0 <= jj < n:
-                coords.append((ii, jj))
-        return tuple(coords)
+        # 2) compute gv from state
+        self._recompute_gv()
 
-    def step(self, t: int = 0) -> None:
+        # 3) update lam
+        self._update_lam()
+
+        self.t += 1
+
+    def _recompute_gv(self) -> None:
         """
-        One grid timestep:
-        1) apply intervention (optional)
-        2) update single cells
-        3) update lam coupling field
-        4) refresh gv field
+        Compute gv[i,j] from each cell snapshot using gv_score(atp, damage, arrest_steps, divisions).
+        We do NOT assume cells store gv.
         """
-        # (1) intervention
-        try:
-            ctx = InterventionContext(t=t) if InterventionContext is not None else {"t": t}
-            self.intervention.apply(self, ctx)
-        except Exception:
-            # keep demo robust
-            pass
+        for i in range(self.n):
+            for j in range(self.n):
+                cell = self.cells[i, j]
+                snap = cell.snapshot() if hasattr(cell, "snapshot") else {}
 
-        # (2) update cells using env
-        for i in range(self.cfg.n):
-            for j in range(self.cfg.n):
-                c = self.cells[i, j]
-                # HealthyCell.step(env, dt=..., rng=...)
-                # use keyword args so signature changes won't explode
-                try:
-                    c.step(env=self.env, dt=1.0, rng=self.rng)  # type: ignore
-                except TypeError:
-                    # older signature variants
-                    try:
-                        c.step(self.env)  # type: ignore
-                    except Exception:
-                        pass
+                atp = float(snap.get("atp", getattr(cell, "atp", 0.0)))
+                damage = float(snap.get("damage", getattr(cell, "damage", 0.0)))
+                arrest_steps = int(snap.get("arrest_steps", getattr(cell, "arrest_steps", 0)))
+                divisions = int(snap.get("divisions", getattr(cell, "divisions", 0)))
 
-        # (3) lambda coupling: neighbor influence + cell-type action + rare mutation drops
-        new_lam = self.lam.copy()
-        for i in range(self.cfg.n):
-            for j in range(self.cfg.n):
-                c = self.cells[i, j]
-                nbrs = self.neighbors(i, j)
-                if nbrs:
-                    nbr_mean = float(np.mean([self.lam[ii, jj] for (ii, jj) in nbrs]))
-                    # pull toward neighbor mean
-                    new_lam[i, j] = (1.0 - self.cfg.neighbor_strength) * new_lam[i, j] + self.cfg.neighbor_strength * nbr_mean
+                self.gv[i, j] = float(gv_score(atp, damage, arrest_steps, divisions))
 
-                # cell-type action
-                if _is_cancer(c):
-                    new_lam[i, j] -= self.cfg.cancer_erode
-                else:
-                    new_lam[i, j] += self.cfg.healthy_reinforce
+    def _update_lam(self) -> None:
+        """
+        Local coupling:
+        - Healthy cells reinforce neighbor lam
+        - Cancer cells erode neighbor lam
+        - Mutation randomly drops lam at sites
+        - Optional smoothing (diffusion-like)
+        """
+        cfg = self.cfg
+        lam_next = self.lam.copy()
 
-                # stochastic mutation (constraint relaxation)
-                if self.rng.random() < self.cfg.mutation_rate:
-                    new_lam[i, j] *= (1.0 - self.cfg.mutation_drop)
+        # neighbor coupling
+        for i in range(self.n):
+            for j in range(self.n):
+                cell = self.cells[i, j]
+                is_cancer = isinstance(cell, CancerCell)
 
-                new_lam[i, j] = _clamp(new_lam[i, j], self.cfg.lam_min, self.cfg.lam_max)
+                delta = -cfg.neighbor_strength if is_cancer else cfg.neighbor_strength
 
-        self.lam = new_lam
+                for ni, nj in self._neighbors4(i, j):
+                    lam_next[ni, nj] += delta
 
-        # (4) refresh gv field (smoothed)
-        self._refresh_gv()
+        # mutation events: random local drops
+        if cfg.mutation_prob > 0.0 and cfg.mutation_drop > 0.0:
+            for i in range(self.n):
+                for j in range(self.n):
+                    if self.rng.random() < cfg.mutation_prob:
+                        lam_next[i, j] -= cfg.mutation_drop
 
-    def _refresh_gv(self) -> None:
-        g_new = np.zeros_like(self.gv)
-        for i in range(self.cfg.n):
-            for j in range(self.cfg.n):
-                c = self.cells[i, j]
-                g_new[i, j] = _compute_gv(c)
+        # optional smoothing (keeps field more "tissue-like")
+        if cfg.lam_smoothing and cfg.lam_smoothing > 0.0:
+            a = float(cfg.lam_smoothing)
+            sm = lam_next.copy()
+            for i in range(self.n):
+                for j in range(self.n):
+                    neigh = [(i, j)]
+                    neigh.extend(list(self._neighbors4(i, j)))
+                    avg = sum(lam_next[x, y] for x, y in neigh) / len(neigh)
+                    sm[i, j] = (1.0 - a) * lam_next[i, j] + a * avg
+            lam_next = sm
 
-        a = float(self.cfg.gv_smooth)
-        if a <= 0.0:
-            self.gv = g_new
-        else:
-            self.gv = (1.0 - a) * self.gv + a * g_new
+        # clamp
+        lam_next = np.clip(lam_next, cfg.lam_min, cfg.lam_max)
 
-    # --- Public API expected by scripts/README ---
+        self.lam = lam_next
 
+    # ---------------------------
+    # observables / helpers
+    # ---------------------------
     def gv_field(self) -> np.ndarray:
         return self.gv.copy()
 
     def lam_field(self) -> np.ndarray:
         return self.lam.copy()
+
+    # Back-compat for scripts that call lambda_field()
+    def lambda_field(self) -> np.ndarray:
+        return self.lam_field()
 
     def mean_gv(self) -> float:
         return float(np.mean(self.gv))
@@ -259,12 +216,23 @@ class Grid:
     def mean_lambda(self) -> float:
         return float(np.mean(self.lam))
 
+    # ---------------------------
+    # convenience runners
+    # ---------------------------
+    def run(self, steps: Optional[int] = None) -> "Grid":
+        """
+        Run for steps (default cfg.steps) and return self.
+        """
+        total = int(self.cfg.steps if steps is None else steps)
+        for _ in range(total):
+            self.step()
+        return self
+
 
 def run_demo() -> None:
     """
     Prints a simple emergence signal:
-    - mean GV over time
-    - mean lambda over time
+    t, mean_gv, mean_lambda
     """
     cfg = GridConfig()
     env = Environment(toxins=0.2, oxygen=0.5, nutrients=0.7)
@@ -273,7 +241,7 @@ def run_demo() -> None:
     print("t,mean_gv,mean_lambda")
     for t in range(cfg.steps + 1):
         if t > 0:
-            grid.step(t=t)
+            grid.step()
         print(f"{t},{grid.mean_gv():.6f},{grid.mean_lambda():.6f}")
 
 
