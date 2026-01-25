@@ -1,3 +1,4 @@
+import os
 import matplotlib.pyplot as plt
 
 from cancer_project import (
@@ -9,10 +10,12 @@ from cancer_project import (
 
 
 def run(cell, env, steps=50):
-    gv = []
+    gv_values = []
+
     for _ in range(steps):
         cell.step(env)
-        gv.append(
+
+        gv_values.append(
             gv_score(
                 cell.atp,
                 cell.damage,
@@ -20,13 +23,17 @@ def run(cell, env, steps=50):
                 cell.divisions,
             )
         )
+
         if not cell.alive:
             break
-    return gv
+
+    return gv_values
 
 
 if __name__ == "__main__":
+    # ----------------------------
     # Environment stress scenario
+    # ----------------------------
     env = Environment(
         toxins=0.2,
         oxygen=0.5,
@@ -36,12 +43,15 @@ if __name__ == "__main__":
     healthy = HealthyCell()
     cancer = CancerCell()
 
-    gv_h = run(healthy, env)
-    gv_c = run(cancer, env)
+    gv_healthy = run(healthy, env)
+    gv_cancer = run(cancer, env)
 
+    # ----------------------------
+    # Plot
+    # ----------------------------
     plt.figure(figsize=(8, 5))
-    plt.plot(gv_h, label="Healthy Cell", linewidth=2)
-    plt.plot(gv_c, label="Cancer Cell", linewidth=2)
+    plt.plot(gv_healthy, label="Healthy Cell", linewidth=2)
+    plt.plot(gv_cancer, label="Cancer Cell", linewidth=2)
 
     plt.xlabel("Time step")
     plt.ylabel("GV (strain / risk)")
@@ -49,6 +59,16 @@ if __name__ == "__main__":
     plt.legend()
     plt.grid(True)
 
+    # ----------------------------
+    # Save plot next to this file
+    # ----------------------------
+    output_path = os.path.join(
+        os.path.dirname(__file__),
+        "gv_healthy_vs_cancer.png"
+    )
+
     plt.tight_layout()
-    plt.savefig("gv_healthy_vs_cancer.png", dpi=150)
-    print("Saved gv_healthy_vs_cancer.png")
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+
+    print(f"Saved plot to: {output_path}")
