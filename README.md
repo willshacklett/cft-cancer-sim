@@ -20,6 +20,18 @@ not merely a collection of local mutations.
 
 ---
 
+## Multicell Emergence via Constraint Coupling
+
+Below is a spatial GV heatmap from the minimal multicell grid model.
+
+No biological rules are encoded — only local constraint reinforcement
+(healthy cells) and erosion (cancer cells). Despite this, invasion-like
+patterns and divergence emerge naturally.
+
+![GV Grid Heatmap](assets/gv_grid_heatmap.png)
+
+---
+
 ## What this is
 
 - A **baseline HealthyCell model**
