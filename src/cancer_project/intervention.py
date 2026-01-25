@@ -1,66 +1,37 @@
 """
-Intervention API (systems demo only).
+Minimal constraint-restoration interventions.
 
-Goal:
-- Define a minimal, stable interface for "therapies" that restore
-  constraint integrity (lambda) without encoding biology.
-
-This is NOT a medical model.
-It is a systems-level demonstration.
+Systems demo only.
+No biology. No medicine.
 """
 
 from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Protocol
+import random
 
 
-@dataclass(frozen=True)
-class InterventionContext:
+@dataclass
+class LocalLambdaRepair:
     """
-    Read-only metadata available to interventions.
+    Local intervention that restores constraint tightness (lambda)
+    when GV strain exceeds a threshold.
 
-    Keep this minimal so the API remains stable as the model evolves.
+    This models recoverability of feedback, not drugs.
     """
-    t: int  # current timestep
+    gv_threshold: float = 0.6
+    repair_amount: float = 0.05
+    max_lambda: float = 2.0
+    probability: float = 0.3  # stochastic, immune-like
 
-
-class Intervention(Protocol):
-    """
-    An intervention modifies the grid *in place*.
-    """
-
-    def apply(self, grid: "Grid", ctx: InterventionContext) -> None:
-        ...
-
-
-class LocalConstraintRestoration:
-    """
-    Minimal intervention:
-    - If a cell's GV exceeds a threshold,
-      locally restore constraint tightness (lambda).
-
-    This tests whether invasion fronts are reversible
-    via feedback recovery alone.
-    """
-
-    def __init__(
-        self,
-        gv_threshold: float = 0.5,
-        restore_strength: float = 0.05,
-        max_lambda: float = 1.5,
-    ):
-        self.gv_threshold = gv_threshold
-        self.restore_strength = restore_strength
-        self.max_lambda = max_lambda
-
-    def apply(self, grid: "Grid", ctx: InterventionContext) -> None:
+    def apply(self, grid, t: int) -> None:
         for i in range(grid.n):
             for j in range(grid.n):
                 cell = grid.cells[i][j]
 
+                # Only act in high-strain regions
                 if cell.gv > self.gv_threshold:
-                    cell.lambda_ = min(
-                        self.max_lambda,
-                        cell.lambda_ + self.restore_strength,
-                    )
+                    if random.random() < self.probability:
+                        cell.lam = min(
+                            self.max_lambda,
+                            cell.lam + self.repair_amount
+                        )
