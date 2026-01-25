@@ -19,7 +19,7 @@ from typing import Optional, List, Tuple
 import random
 import numpy as np
 
-# Import single-cell components (must exist)
+# Import single-cell components
 from cancer_project import Environment, HealthyCell, CancerCell
 
 
@@ -40,7 +40,7 @@ class GridConfig:
 # ---------------------------------------------------------------------
 
 class Grid:
-    def __init__(self, cfg: GridConfig):
+    def __init__(self, cfg: GridConfig, env: Optional[Environment] = None):
         if cfg.seed is not None:
             random.seed(cfg.seed)
             np.random.seed(cfg.seed)
@@ -49,8 +49,8 @@ class Grid:
         self.n = cfg.n
         self.t = 0
 
-        # Shared environment
-        self.env = Environment()
+        # Environment (accept injected OR create)
+        self.env = env if env is not None else Environment()
 
         # Allocate fields
         self.cells: List[List[object]] = []
@@ -87,12 +87,12 @@ class Grid:
     def step(self, dt: float = 1.0):
         self.t += 1
 
-        # 1) Let cells evolve internally
+        # 1) Cell internal dynamics
         for i in range(self.n):
             for j in range(self.n):
                 self.cells[i][j].step(self.env, dt)
 
-        # 2) Update lambda field via coupling
+        # 2) Constraint coupling (lambda)
         new_lam = self.lam.copy()
 
         for i in range(self.n):
@@ -106,17 +106,16 @@ class Grid:
 
         self.lam = np.clip(new_lam, 0.0, 2.0)
 
-        # 3) Update GV field (strain accumulation)
+        # 3) GV accumulation
         for i in range(self.n):
             for j in range(self.n):
-                cell = self.cells[i][j]
-                if isinstance(cell, CancerCell):
+                if isinstance(self.cells[i][j], CancerCell):
                     self.gv[i, j] += 0.05 * (1.0 + (1.0 - self.lam[i, j]))
                 else:
                     self.gv[i, j] *= 0.97
 
     # -----------------------------------------------------------------
-    # Field accessors (PLOT SAFE)
+    # Field accessors (plot-safe)
     # -----------------------------------------------------------------
 
     def gv_field(self) -> np.ndarray:
@@ -125,7 +124,7 @@ class Grid:
     def lam_field(self) -> np.ndarray:
         return self.lam.copy()
 
-    # Explicit compatibility (your script expects this)
+    # Backward compatibility
     def lambda_field(self) -> np.ndarray:
         return self.lam_field()
 
@@ -148,9 +147,7 @@ class Grid:
         grid.run()
 
         for t in range(cfg.steps):
-            mean_gv = grid.gv.mean()
-            mean_lam = grid.lam.mean()
-            print(f"{t},{mean_gv:.6f},{mean_lam:.6f}")
+            print(f"{t},{grid.gv.mean():.6f},{grid.lam.mean():.6f}")
 
 
 if __name__ == "__main__":
