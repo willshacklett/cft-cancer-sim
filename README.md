@@ -1,12 +1,23 @@
 # Cancer Project
 
-A toy cancer dynamics simulator built on **GV (scalar strain/risk)** and **CFT-inspired constraint coupling**.
+A toy cancer dynamics simulator built on **GV (scalar strain / risk)** and **CFT-inspired constraint coupling**.
+
+This project is intentionally simple: it demonstrates how **constraint failure** drives divergence between healthy and cancerous systems over time.
+
+---
 
 ## What this is
-- A **baseline healthy cell model**
-- A **GV score** that rises when constraints fail (energy, repair, checkpoints)
-- A simulator that will later add **CancerCell** as “constraint exploitation”
 
-## Run (local)
-```bash
-python -c "from cancer_project import run_sim; print(run_sim(steps=30)[:5])"
+- A **baseline HealthyCell model**
+- A **CancerCell model** that exploits weakened constraints
+- A **GV (God Variable) score** that rises as strain accumulates  
+  (energy loss, damage, arrest failures, uncontrolled division)
+- A reproducible simulation that **executes, plots, and saves artifacts**
+
+This is not a medical claim.  
+It is a **systems-level demonstration**.
+
+---
+
+## Project structure
+
