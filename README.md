@@ -25,6 +25,26 @@ It is a **systems-level demonstration**.
 
 ---
 
+### GV update intuition (informal)
+
+GV (God Variable) represents accumulated system strain.
+
+At each timestep:
+
+GVₜ₊₁ = GVₜ + Σ(strain sources) − λ × constraint_strength × GVₜ
+
+Where:
+- strain sources include energy loss, damage, checkpoint failure, and division stress
+- constraint_strength reflects how well corrective mechanisms function
+- λ controls feedback tightness (high in healthy systems, reduced in cancer)
+
+Healthy cells maintain tight feedback, keeping GV bounded.
+Cancer cells exploit weakened constraints, allowing GV to grow unchecked.
+
+This is a systems-level demonstration, not a biological or medical claim.
+
+---
+
 ## Project structure
 
 ```text
