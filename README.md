@@ -45,6 +45,16 @@ This is a systems-level demonstration, not a biological or medical claim.
 
 ---
 
+## Why this exists
+
+This repo tests a simple question:
+
+> If you relax constraint integrity locally, does emergence appear even without domain-specific rules?
+
+So far, the answer appears to be yes.
+
+---
+
 ## Project structure
 
 ```text
