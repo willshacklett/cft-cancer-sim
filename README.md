@@ -6,7 +6,7 @@ This project is intentionally simple: it demonstrates how **constraint failure**
 
 This model demonstrates that:
 - Order and cooperation can emerge from constraint coupling alone
-- Failure modes (invasion, divergence, instability) arise when constraints weaken
+- Characteristic failure modes (invasion, divergence, instability) arise when constraints weaken
 - No explicit biological rules are required for cancer-like dynamics to appear
 
 This supports a systems-level view where pathology is a failure of constraint integrity,
