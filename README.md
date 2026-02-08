@@ -1,3 +1,6 @@
+> **Start here (Hub):** https://github.com/willshacklett/god-variable-theory  
+> One-click ecosystem map • demos • CI enforcement • runtime monitoring
+
 # Cancer Project
 
 A toy cancer dynamics simulator built on **GV (scalar strain / risk)** and **CFT-inspired constraint coupling**.
